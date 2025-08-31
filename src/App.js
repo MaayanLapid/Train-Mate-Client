@@ -40,7 +40,7 @@ export default function App() {
 }
 
 function MainContainer({ children }) {
-    return (
+  return (
     <Container sx={{ py: 3 }}>
       <Box sx={{ display: "grid", gap: 2 }}>{children}</Box>
     </Container>
@@ -53,5 +53,6 @@ function Home() {
       <h2>ברוכים הבאים ל-TrainMate</h2>
       <p>התחברו כמאמן/אדמין כדי להמשיך.</p>
     </Box>
+
   );
 }
