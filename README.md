@@ -36,16 +36,16 @@ npm install
 3. Run the client app
 npm start
 
-# Make sure the backend server (TrainMateServer) is running locally (default: https://localhost:7225).
+### Make sure the backend server (TrainMateServer) is running locally (default: https://localhost:7225).
 
 ## Project Structure
 src/
-├── components/      # Reusable components (Forms, Lists, etc.)
-├── pages/           # Admin / Client / Login pages
-├── services/        # API functions
-├── context/         # Auth context
-├── theme/           # MUI theme setup
-└── config.js        # API base URLs
+-- ├── components/      # Reusable components (Forms, Lists, etc.)
+-- ├── pages/           # Admin / Client / Login pages
+-- ├── services/        # API functions
+-- ├── context/         # Auth context
+-- ├── theme/           # MUI theme setup
+-- └── config.js        # API base URLs
 
 ## Technologies Used
 - React 18
