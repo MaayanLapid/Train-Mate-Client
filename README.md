@@ -1,10 +1,31 @@
-# Getting Started with Create React App
+# TrainMate
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+TrainMate is a fitness tracking application built as a full-stack project.
+It allows admins to manage trainees, exercises and exercise types, and lets trainees log and view their workouts through a web interface.
 
-## Available Scripts
+## Key Features
 
-In the project directory, you can run:
+RESTful API (ASP.NET Core 7) for managing:
+
+Trainees
+
+Exercise types
+
+Exercises
+
+Workouts
+
+Entity Framework Core for database access and migrations
+
+Client built with React + MUI (Material UI) for a modern responsive UI
+
+Authentication & authorization with separate roles:
+
+Admin – manage trainees, exercise types, and exercises
+
+Client – log and view personal workouts
+
+CORS enabled for local development (localhost:3000)
 
 ### `npm start`
 
