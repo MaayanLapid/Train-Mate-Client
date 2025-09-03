@@ -32,9 +32,11 @@ It communicates with the ASP.NET Core backend to manage trainees, exercises, exe
    git clone https://github.com/YOUR_USERNAME/Train-Mate-Client.git
    cd Train-Mate-Client
 2. Install dependencies
-  - npm install
+    ```bash   
+    npm install
 3. Run the client app
-- npm start
+     ```bash
+    npm start
 
 ### Make sure the backend server (TrainMateServer) is running locally (default: https://localhost:7225).
 
