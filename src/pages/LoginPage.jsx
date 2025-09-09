@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate, Link as RouterLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { fetchTrainees } from "../services/api";
 
@@ -7,164 +8,158 @@ import {
   Box,
   Button,
   Card,
-  CardActions,
   CardContent,
-  Container,
+  CircularProgress,
+  Link,
+  Snackbar,
   Stack,
-  Tab,
-  Tabs,
   TextField,
   Typography,
-  Snackbar,
 } from "@mui/material";
 
+
 export default function LoginPage() {
-  const { auth, login } = useAuth();
-  const [tab, setTab] = useState(0); // 0=client, 1=admin
+  const navigate = useNavigate();
+  const { user, login } = useAuth();
 
-  // Client state
-  const [trainees, setTrainees] = useState([]);
-  const [clientName, setClientName] = useState("");
-  const [clientPass, setClientPass] = useState("");
-  const [loadingTrainees, setLoadingTrainees] = useState(true);
+  // Form state
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
-  // Admin state
-  const [adminUser, setAdminUser] = useState("");
-  const [adminPass, setAdminPass] = useState("");
-
-  // UI
-  const [error, setError] = useState("");
-  const [snackOpen, setSnackOpen] = useState(false);
+  // UI state
+  const [loading, setLoading] = useState(false);
+  const [snack, setSnack] = useState({ open: false, msg: "", severity: "error" });
 
   useEffect(() => {
-    // Load trainees only when on "client" tab
-    let mounted = true;
-    (async () => {
-      if (tab !== 0) {
-        setLoadingTrainees(false);
-        return;
-      }
-      try {
-        setLoadingTrainees(true);
-        const list = await fetchTrainees();
-        if (!mounted) return;
-        setTrainees(list || []);
-      } catch (err) {
-        if (!mounted) return;
-        setError(err.message || "Failed to load trainees");
-        setSnackOpen(true);
-      } finally {
-        if (!mounted) return;
-        setLoadingTrainees(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [tab]);
+    if (!user) return;
+    if (user.role === "admin") navigate("/admin", { replace: true });
+    else if (user.role === "client") navigate("/me", { replace: true });
+  }, [user, navigate]);
 
-  function handleTabChange(_, newValue) {
-    setTab(newValue);
-    setError("");
+  function openSnack(msg, severity = "error") {
+    setSnack({ open: true, msg, severity });
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
-    setError("");
 
-    if (tab === 1) {
-        if (adminUser.trim().toLowerCase() === "admin" && adminPass.length >= 4) {
-        login({ role: "admin", traineeId: null, traineeName: "Admin" });
+    // Basic validation
+    if (!username.trim() || !password) {
+      return openSnack("חובה להזין שם משתמש וסיסמה");
+    }
+
+    try {
+      setLoading(true);
+
+
+      if (username.trim().toLowerCase() === "admin") {
+        if (password.length >= 8) {
+          login({ id: "admin", name: "Admin", role: "admin" });
+          openSnack("ברוך הבא, אדמין!", "success");
+          navigate("/admin", { replace: true });
+          return;
+        } else {
+          openSnack("סיסמת אדמין חייבת להיות לפחות 8 תווים");
+          return;
+        }
+      }
+
+
+      const trainees = await fetchTrainees();
+      const found = (trainees || []).find(
+        (t) =>
+          t.traineeName?.trim().toLowerCase() === username.trim().toLowerCase() &&
+          String(t.password) === String(password)
+      );
+
+      if (!found) {
+        openSnack("שם משתמש או סיסמה שגויים");
         return;
       }
-      setError("Invalid admin credentials (demo). Try user: admin, pass: any >= 4 chars");
-      setSnackOpen(true);
-      return;
-    }
 
-    const t = trainees.find((x) => x.traineeName === clientName);
-    if (!t) {
-      setError("Trainee not found");
-      setSnackOpen(true);
-      return;
-    }
-    if (t.password !== clientPass) {
-      setError("Wrong password");
-      setSnackOpen(true);
-      return;
-    }
+      // Save user to auth context and go to client page
+      login({
+        id: found.traineeId,
+        name: found.traineeName,
+        role: "client",
+      });
 
-    login({ role: "client", traineeId: t.traineeId, traineeName: t.traineeName });
-  }
-
-  if (auth) {
-    return (
-      <Container maxWidth="sm" sx={{ mt: 4 }}>
-        <Alert severity="info">את/ה כבר מחובר/ת. ניתן לעבור בתפריט לעמוד המתאים.</Alert>
-      </Container>
-    );
+      openSnack("התחברת בהצלחה!", "success");
+      navigate("/me", { replace: true });
+    } catch (err) {
+      openSnack(err?.message || "שגיאה בהתחברות");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <Container maxWidth="sm" sx={{ mt: 6 }}>
-      <Card>
+    <Box
+      sx={{
+        minHeight: "calc(100vh - 64px)",
+        display: "grid",
+        placeItems: "center",
+        px: 2,
+      }}
+    >
+      <Card sx={{ width: "100%", maxWidth: 420 }}>
         <CardContent>
-          <Typography variant="h5" gutterBottom align="center">
-            התחברות
-          </Typography>
+          <Stack component="form" onSubmit={handleSubmit} spacing={2}>
+            <Typography variant="h5" align="center" gutterBottom>
+              התחברות ל־TrainMate
+            </Typography>
 
-          <Tabs value={tab} onChange={handleTabChange} variant="fullWidth" sx={{ mb: 2 }}>
-            <Tab label="לקוח" />
-            <Tab label="אדמין" />
-          </Tabs>
+            <TextField
+              label="שם משתמש"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              fullWidth
+              disabled={loading}
+            />
 
-          <Box component="form" onSubmit={handleSubmit}>
-            {tab === 1 ? (
-              <Stack spacing={2}>
-                <TextField
-                  label="Admin user"
-                  value={adminUser}
-                  onChange={(e) => setAdminUser(e.target.value)}
-                  fullWidth
-                />
-                <TextField
-                  label="Admin password"
-                  type="password"
-                  value={adminPass}
-                  onChange={(e) => setAdminPass(e.target.value)}
-                  fullWidth
-                />
-              </Stack>
-            ) : (
-              <Stack spacing={2}>
-                <TextField
-                  label="שם מתאמן"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  fullWidth
-                  disabled={loadingTrainees}
-                  helperText={loadingTrainees ? "טוען מתאמנים…" : "הקלד את שמך כפי שנוצר במערכת"}
-                />
-                <TextField
-                  label="סיסמה"
-                  type="password"
-                  value={clientPass}
-                  onChange={(e) => setClientPass(e.target.value)}
-                  fullWidth
-                  disabled={loadingTrainees}
-                />
-              </Stack>
-            )}
-            <CardActions sx={{ mt: 2, justifyContent: "flex-end" }}>
-              <Button type="submit">התחברות</Button>
-            </CardActions>
-          </Box>
+            <TextField
+              label="סיסמה"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              fullWidth
+              disabled={loading}
+            />
+
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={loading}
+              startIcon={loading ? <CircularProgress size={18} /> : null}
+            >
+              {loading ? "מתחבר…" : "התחבר"}
+            </Button>
+
+            <Typography variant="body2" align="center">
+              אין לך משתמש?{" "}
+              <Link component={RouterLink} to="/register">
+                צור חשבון חדש
+              </Link>
+            </Typography>
+          </Stack>
         </CardContent>
       </Card>
 
-      <Snackbar open={snackOpen} autoHideDuration={4000} onClose={() => setSnackOpen(false)}>
-        {error ? <Alert onClose={() => setSnackOpen(false)} severity="error">{error}</Alert> : null}
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={3500}
+        onClose={() => setSnack((s) => ({ ...s, open: false }))}
+      >
+        <Alert
+          severity={snack.severity}
+          onClose={() => setSnack((s) => ({ ...s, open: false }))}
+          sx={{ width: "100%" }}
+        >
+          {snack.msg}
+        </Alert>
       </Snackbar>
-    </Container>
+    </Box>
   );
 }

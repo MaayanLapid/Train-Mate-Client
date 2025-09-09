@@ -1,32 +1,49 @@
-import { useEffect, useMemo, useState } from "react";
-import { fetchWorkouts, fetchTrainees } from "../services/api";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import {
+  Alert,
+  Box,
+  Card,
+  CardContent,
+  CircularProgress,
+  Divider,
+  FormControl,
+  InputLabel,
+  List,
+  ListItem,
+  ListItemText,
+  MenuItem,
+  Select,
+  Stack,
+  Typography,
+  Chip,
+} from "@mui/material";
+import {
+  fetchTrainees,
+  fetchWorkouts,
+  fetchWorkoutById,
+} from "../services/api";
 
-export default function WorkoutsList({ fixedTraineeId, start, end }) {
+export default function WorkoutsList({ fixedTraineeId }) {
   const [trainees, setTrainees] = useState([]);
   const [selectedTraineeId, setSelectedTraineeId] = useState(fixedTraineeId || "");
-  const [workouts, setWorkouts] = useState([]);
 
+  const [workouts, setWorkouts] = useState([]);
   const [loadingTrainees, setLoadingTrainees] = useState(!fixedTraineeId);
   const [loadingWorkouts, setLoadingWorkouts] = useState(false);
   const [error, setError] = useState(null);
 
-  // Compute effective date range (fallback to ±30 days if not provided)
-  const range = useMemo(() => {
-    if (start && end) return { start, end };
 
-    // Use getTime() to avoid mutating 'now'
-    const toISO = (d) => d.toISOString().slice(0, 10);
-    const now = new Date();
-    const DAY_MS = 24 * 60 * 60 * 1000;
-    const startFallback = new Date(now.getTime() - 30 * DAY_MS);
-    const endFallback = new Date(now.getTime() + 30 * DAY_MS);
-    return { start: toISO(startFallback), end: toISO(endFallback) };
-  }, [start, end]);
+  const { startISO, endISO } = useMemo(() => {
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const start = new Date(now - 30 * day);
+    const end = new Date(now + 30 * day);
+    return { startISO: toISO(start), endISO: toISO(end) };
+  }, []);
 
-  // Load trainees ONLY if there is no fixed trainee
+
   useEffect(() => {
     if (fixedTraineeId) {
-      // If a fixed trainee is provided, set it and skip loading trainees
       setSelectedTraineeId(fixedTraineeId);
       setLoadingTrainees(false);
       return;
@@ -35,199 +52,190 @@ export default function WorkoutsList({ fixedTraineeId, start, end }) {
     let mounted = true;
     (async () => {
       try {
-        setError(null);
         setLoadingTrainees(true);
         const list = await fetchTrainees();
         if (!mounted) return;
-
         setTrainees(list || []);
-        // Auto-select first trainee if available
-        if (list?.length) setSelectedTraineeId(list[0].traineeId);
+        if (!selectedTraineeId && list?.length) {
+          setSelectedTraineeId(list[0].traineeId);
+        }
       } catch (err) {
         if (!mounted) return;
         setError(err.message || "Failed to load trainees");
       } finally {
-        if (!mounted) return;
-        setLoadingTrainees(false);
+        if (mounted) setLoadingTrainees(false);
       }
     })();
 
     return () => {
       mounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixedTraineeId]);
 
-  // Load workouts whenever selected trainee or range changes
-  useEffect(() => {
+  const loadWorkouts = useCallback(async () => {
     if (!selectedTraineeId) return;
+    try {
+      setError(null);
+      setLoadingWorkouts(true);
 
-    let mounted = true;
-    (async () => {
-      try {
-        setError(null);
-        setLoadingWorkouts(true);
+      const list = (await fetchWorkouts({
+        traineeId: selectedTraineeId,
+        start: startISO,
+        end: endISO,
+      })) || [];
 
-        // Fetch workouts by trainee in the computed/received range
-        const list = await fetchWorkouts({
-          traineeId: selectedTraineeId,
-          start: range.start,
-          end: range.end,
-        });
+      const detailed = await Promise.all(
+        list.map(async (w) => {
+          try {
+            return await fetchWorkoutById(w.workoutId);
+          } catch {
+            return w; // fallback to raw
+          }
+        })
+      );
 
-        if (!mounted) return;
-        setWorkouts(list || []);
-      } catch (err) {
-        if (!mounted) return;
-        setError(err.message || "Failed to load workouts");
-        setWorkouts([]);
-      } finally {
-        if (!mounted) return;
-        setLoadingWorkouts(false);
-      }
-    })();
+      setWorkouts(detailed);
+    } catch (err) {
+      setError(err.message || "Failed to load workouts");
+      setWorkouts([]);
+    } finally {
+      setLoadingWorkouts(false);
+    }
+  }, [selectedTraineeId, startISO, endISO]);
 
-    return () => {
-      mounted = false;
-    };
-  }, [selectedTraineeId, range.start, range.end]);
+  // load when trainee changes
+  useEffect(() => {
+    loadWorkouts();
+  }, [loadWorkouts]);
 
-  if (loadingWorkouts) return <p>טוען אימונים…</p>;
-  if (error) return <p>שגיאה: {error}</p>;
+  // optional: global refresh hook (e.g., fired by AddWorkoutForm after submit)
+  useEffect(() => {
+    function onRefresh() {
+      loadWorkouts();
+    }
+    window.addEventListener("workouts:refresh", onRefresh);
+    return () => window.removeEventListener("workouts:refresh", onRefresh);
+  }, [loadWorkouts]);
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <h2 style={{ textAlign: "center" }}>אימונים</h2>
+    <Stack spacing={2}>
+      <Typography variant="h5" align="center">
+        אימונים
+      </Typography>
 
-      {/* Render trainee picker ONLY if not fixed */}
+      {/* Trainee picker (hidden if fixed) */}
       {!fixedTraineeId && (
-        <TraineePicker
-          trainees={trainees}
-          loading={loadingTrainees}
-          value={selectedTraineeId}
-          onChange={setSelectedTraineeId}
-        />
-      )}
-
-      {workouts.length === 0 ? (
-        <p>אין אימונים להצגה.</p>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 12 }}>
-          {workouts.map((w) => (
-            <li key={w.workoutId}>
-              <WorkoutCard workout={w} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function TraineePicker({ trainees, loading, value, onChange }) {
-  return (
-    <div style={{ display: "grid", gap: 6, maxWidth: 420 }}>
-      <label>
-        בחר מתאמן
-        {loading ? (
-          <div>טוען מתאמנים…</div>
-        ) : (
-          <select
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            style={{ width: "100%", padding: 8 }}
+        <FormControl fullWidth disabled={loadingTrainees}>
+          <InputLabel id="trainee-label">בחר מתאמן</InputLabel>
+          <Select
+            labelId="trainee-label"
+            label="בחר מתאמן"
+            value={selectedTraineeId}
+            onChange={(e) => setSelectedTraineeId(e.target.value)}
           >
-            {!trainees.length && <option value="">אין מתאמנים</option>}
+            {!trainees.length && <MenuItem value="">אין מתאמנים</MenuItem>}
             {trainees.map((t) => (
-              <option key={t.traineeId} value={t.traineeId}>
+              <MenuItem key={t.traineeId} value={t.traineeId}>
                 {t.traineeName}
-              </option>
+              </MenuItem>
             ))}
-          </select>
-        )}
-      </label>
-    </div>
-  );
-}
-
-
-function WorkoutCard({ workout }) {
-  // Safely access fields that may be null
-  const dateLabel = formatDate(workout.workoutDate ?? workout.date);
-  const traineeName = workout.trainee?.traineeName ?? "—";
-  const exercises = Array.isArray(workout.exercises) ? workout.exercises : [];
-
-  return (
-    <article
-      style={{
-        border: "1px solid #ddd",
-        borderRadius: 12,
-        padding: 16,
-        display: "grid",
-        gap: 8,
-      }}
-    >
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-        }}
-      >
-        <strong>Workout: {workout.workoutId}</strong>
-        <span>תאריך: {dateLabel}</span>
-      </header>
-
-      <div style={{ opacity: 0.8 }}>
-        {/* Show trainee name if API returns it; otherwise show the ID */}
-        מתאמן: {traineeName}{" "}
-        <span style={{ fontSize: 12, opacity: 0.7 }}>({workout.traineeId})</span>
-      </div>
-
-      <div>
-        <strong>תרגילים:</strong> {exercises.length}
-      </div>
-
-      {!!exercises.length && (
-        <ul
-          style={{
-            listStyle: "none",
-            padding: 0,
-            margin: 0,
-            display: "grid",
-            gap: 6,
-          }}
-        >
-          {exercises.map((ex) => (
-            <li
-              key={ex.exerciseId}
-              style={{
-                background: "#fafafa",
-                border: "1px solid #eee",
-                borderRadius: 8,
-                padding: 8,
-              }}
-            >
-              {/* Exercise row */}
-              <div>
-                <strong>
-                  {ex.exerciseType?.exerciseTypeName ?? ex.exerciseTypeId ?? "Exercise"}
-                </strong>
-              </div>
-              <div style={{ opacity: 0.85 }}>
-                סטים: {ex.sets ?? "—"}, חזרות: {ex.repetitions ?? "—"}
-              </div>
-            </li>
-          ))}
-        </ul>
+          </Select>
+        </FormControl>
       )}
-    </article>
+
+      {error && <Alert severity="error">שגיאה: {error}</Alert>}
+
+      {loadingWorkouts ? (
+        <Box sx={{ display: "grid", placeItems: "center", py: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : !workouts.length ? (
+        <Typography align="center" sx={{ opacity: 0.8 }}>
+          אין אימונים להצגה.
+        </Typography>
+      ) : (
+        <Stack spacing={2}>
+          {workouts.map((w) => {
+            const dateLabel = formatDate(w.workoutDate ?? w.date);
+            const exercises = w.exercises ?? [];
+            const traineeName = w.trainee?.traineeName;
+
+            return (
+              <Card key={w.workoutId} variant="outlined">
+                <CardContent>
+                  <Stack spacing={1}>
+                    <Stack
+                      direction="row"
+                      alignItems="baseline"
+                      justifyContent="space-between"
+                      gap={1}
+                    >
+                      <Typography variant="h6">Workout: {w.workoutId}</Typography>
+                      <Typography variant="body2">תאריך: {dateLabel}</Typography>
+                    </Stack>
+
+                    <Typography variant="body2" sx={{ opacity: 0.8 }}>
+                      מתאמן: {traineeName ? `${traineeName} ` : ""}
+                      <span style={{ opacity: 0.7 }}>({w.traineeId})</span>
+                    </Typography>
+
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Typography variant="subtitle2">תרגילים:</Typography>
+                      <Chip size="small" label={exercises.length} />
+                    </Stack>
+
+                    {!!exercises.length && (
+                      <>
+                        <Divider sx={{ my: 1 }} />
+                        <List dense sx={{ py: 0 }}>
+                          {exercises.map((ex) => {
+                            const name =
+                              ex.exerciseType?.exerciseTypeName ||
+                              ex.exerciseTypeId ||
+                              "תרגיל";
+
+                            return (
+                              <ListItem
+                                key={ex.exerciseId}
+                                sx={{
+                                  border: "1px solid #eee",
+                                  borderRadius: 1,
+                                  mb: 0.5,
+                                }}
+                              >
+                                <ListItemText
+                                  primary={name}
+                                  secondary={`סטים: ${ex.sets ?? "—"}, חזרות: ${ex.repetitions ?? "—"
+                                    }`}
+                                />
+                              </ListItem>
+                            );
+                          })}
+                        </List>
+                      </>
+                    )}
+                  </Stack>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </Stack>
+      )}
+    </Stack>
   );
 }
 
+// yyyy-MM-dd
+function toISO(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+// Pretty date for UI
 function formatDate(isoOrNull) {
   if (!isoOrNull) return "—";
   const d = new Date(isoOrNull);
-  if (isNaN(d)) return isoOrNull; // fallback to raw string if invalid
+  if (isNaN(d)) return isoOrNull;
   return d.toLocaleString("he-IL", {
     year: "numeric",
     month: "2-digit",

@@ -1,220 +1,426 @@
-import { useEffect, useState } from "react";
-import { fetchTrainees, fetchExercises, reportExercise } from "../services/api";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  FormHelperText,
+  InputLabel,
+  MenuItem,
+  Select,
+  Snackbar,
+  Stack,
+  TextField,
+  Typography,
+} from "@mui/material";
 
-export default function AddWorkoutForm({ onCreated, fixedTraineeId }) {
-  // Reference data
+import {
+  fetchExercises,
+  fetchTrainees,
+  fetchExerciseTypes,
+  reportExercise,
+  createExerciseType, // quick-add type
+  createExercise, // quick-add exercise (sets/reps)
+} from "../services/api";
+
+
+export default function AddWorkoutForm({ defaultTraineeId }) {
   const [trainees, setTrainees] = useState([]);
+  const [types, setTypes] = useState([]);
   const [exercises, setExercises] = useState([]);
 
-  // Form fields
-  const [traineeId, setTraineeId] = useState(fixedTraineeId || "");
+  const [traineeId, setTraineeId] = useState(defaultTraineeId || "");
+  const [workoutDate, setWorkoutDate] = useState(toISO(new Date()));
+  const [exerciseTypeId, setExerciseTypeId] = useState("");
   const [exerciseId, setExerciseId] = useState("");
-  const [workoutDate, setWorkoutDate] = useState(""); // datetime-local string: "YYYY-MM-DDTHH:mm"
 
-  // UI state
-  const [loading, setLoading] = useState(true);       // loading of dropdown data
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [snack, setSnack] = useState({ open: false, msg: "", severity: "success" });
 
-  // Load dropdown data (trainees/exercises)
+
+  const [typeDialogOpen, setTypeDialogOpen] = useState(false);
+  const [newTypeName, setNewTypeName] = useState("");
+  const [creatingType, setCreatingType] = useState(false);
+
+  const [exDialogOpen, setExDialogOpen] = useState(false);
+  const [newReps, setNewReps] = useState("");
+  const [newSets, setNewSets] = useState("");
+  const [creatingExercise, setCreatingExercise] = useState(false);
+
+  const filteredExercises = useMemo(() => {
+    if (!exerciseTypeId) return exercises;
+    return exercises.filter((e) => e.exerciseTypeId === exerciseTypeId);
+  }, [exercises, exerciseTypeId]);
+
+
   useEffect(() => {
     let mounted = true;
-
     (async () => {
       try {
-        setError(null);
         setLoading(true);
 
-        // Load exercises (always)
-        const exList = await fetchExercises();
-
-        // Load trainees only if not fixed
-        let trList = [];
-        if (!fixedTraineeId) {
-          trList = await fetchTrainees();
+        // Load trainees if not fixed
+        if (!defaultTraineeId) {
+          const t = await fetchTrainees();
+          if (!mounted) return;
+          setTrainees(t || []);
+          if (!traineeId && t?.length) setTraineeId(t[0].traineeId);
         }
 
+        // Load types
+        const ty = await fetchExerciseTypes();
         if (!mounted) return;
+        setTypes(ty || []);
+        if (!exerciseTypeId && ty?.length) setExerciseTypeId(ty[0].exerciseTypeId);
 
-        setExercises(exList || []);
-        setTrainees(trList || []);
-
-        // Preselect defaults if empty
-        if (!fixedTraineeId && trList?.length && !traineeId) {
-          setTraineeId(trList[0].traineeId);
-        }
-        if (exList?.length && !exerciseId) {
-          setExerciseId(exList[0].exerciseId);
-        }
-
-        // Default workout date: now → "YYYY-MM-DDTHH:mm"
-        if (!workoutDate) {
-          setWorkoutDate(toDatetimeLocalValue(new Date()));
-        }
+        // Load existing exercises
+        const ex = await fetchExercises();
+        if (!mounted) return;
+        setExercises(ex || []);
       } catch (err) {
-        if (!mounted) return;
-        setError(err.message || "Failed to load form data");
+        openSnack(err.message || "שגיאה בטעינת נתונים", "error");
       } finally {
-        if (!mounted) return;
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     })();
-
     return () => {
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fixedTraineeId]);
+  }, [defaultTraineeId]);
 
-  // If parent changes fixedTraineeId dynamically, sync it to form
-  useEffect(() => {
-    if (fixedTraineeId) setTraineeId(fixedTraineeId);
-  }, [fixedTraineeId]);
+  function openSnack(msg, severity = "success") {
+    setSnack({ open: true, msg, severity });
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
-    setError(null);
-    setSuccess("");
+    setSubmitted(true);
 
-    // Basic validations
-    if (!traineeId) return setError("בחר מתאמן");
-    if (!exerciseId) return setError("בחר תרגיל");
-    if (!workoutDate) return setError("בחר תאריך ושעה");
+    if (!traineeId) return openSnack("בחר/י מתאמן", "error");
+    if (!workoutDate) return openSnack("בחר/י תאריך אימון", "error");
+    if (!exerciseId) return openSnack("בחר/י תרגיל קיים או הוספ/י אחד חדש", "error");
 
     try {
       setSubmitting(true);
+      await reportExercise({ traineeId, exerciseId, workoutDate }); // yyyy-MM-dd
+      window.dispatchEvent(new Event("workouts:refresh"));
+      openSnack("האימון נוסף בהצלחה 🎉", "success");
 
-      // Convert datetime-local to ISO string (backend model binder parses it)
-      const isoDate = new Date(workoutDate).toISOString();
-
-      const created = await reportExercise({
-        workoutDate: isoDate,
-        traineeId,
-        exerciseId,
-      });
-
-      setSuccess("האימון נוצר והתרגיל שויך בהצלחה 🎉");
-
-      if (typeof onCreated === "function") onCreated(created);
+      // Reset minimal selection
+      setExerciseId("");
+      setSubmitted(false);
     } catch (err) {
-      setError(err.message || "שגיאה ביצירת האימון");
+      openSnack(err.message || "שגיאה בהוספת האימון", "error");
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (loading) {
-    return (
-      <section style={{ display: "grid", gap: 12, maxWidth: 520 }}>
-        <h3>דיווח תרגיל (Report Exercise)</h3>
-        <p>טוען נתונים…</p>
-      </section>
-    );
+  /** Create a new Exercise Type inline (dialog). */
+  async function handleCreateType() {
+    const name = newTypeName.trim();
+    if (!name) return openSnack("שם סוג התרגיל חובה", "error");
+
+    try {
+      setCreatingType(true);
+      const created = await createExerciseType({ exerciseTypeName: name });
+
+      // Refresh and auto-select new type
+      const fresh = await fetchExerciseTypes();
+      setTypes(fresh || []);
+      setExerciseTypeId(created.exerciseTypeId);
+
+      setTypeDialogOpen(false);
+      setNewTypeName("");
+      openSnack("סוג תרגיל נוסף בהצלחה", "success");
+    } catch (err) {
+      openSnack(err.message || "שגיאה בהוספת סוג תרגיל", "error");
+    } finally {
+      setCreatingType(false);
+    }
   }
 
-  return (
-    <section style={{ display: "grid", gap: 12, maxWidth: 520 }}>
-      <h3>דיווח תרגיל (Report Exercise)</h3>
+  /** Create a new Exercise inline (dialog) for the selected type. */
+  async function handleCreateExercise() {
+    if (!exerciseTypeId) return openSnack("בחר/י קודם סוג תרגיל", "error");
 
-      <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
-        {/* Trainee picker (hidden when fixedTraineeId is provided) */}
-        {!fixedTraineeId && (
-          <LabeledSelect
-            label="מתאמן"
-            value={traineeId}
-            onChange={setTraineeId}
-            disabled={submitting || !trainees.length}
-            options={trainees.map((t) => ({
-              value: t.traineeId,
-              label: t.traineeName,
-            }))}
-            emptyLabel="אין מתאמנים"
+    const repsNum = Number(newReps);
+    const setsNum = Number(newSets);
+
+    if (!Number.isFinite(repsNum) || repsNum <= 0) {
+      return openSnack("חזרות חייב להיות מספר גדול מאפס", "error");
+    }
+    if (!Number.isFinite(setsNum) || setsNum <= 0) {
+      return openSnack("סטים חייב להיות מספר גדול מאפס", "error");
+    }
+
+    try {
+      setCreatingExercise(true);
+
+      // Create the exercise
+      const created = await createExercise({
+        exerciseTypeId,
+        repetitions: repsNum,
+        sets: setsNum,
+      });
+
+      // Refresh list and auto-select
+      const ex = await fetchExercises();
+      setExercises(ex || []);
+      setExerciseId(created.exerciseId);
+
+      setExDialogOpen(false);
+      setNewReps("");
+      setNewSets("");
+      openSnack("תרגיל נוסף בהצלחה", "success");
+    } catch (err) {
+      openSnack(err.message || "שגיאה בהוספת תרגיל", "error");
+    } finally {
+      setCreatingExercise(false);
+    }
+  }
+
+  if (loading) return <p>טוען נתונים…</p>;
+
+
+  return (
+    <Card>
+      <CardContent>
+        <Typography variant="h6" gutterBottom>
+          הוספת אימון
+        </Typography>
+
+        <Stack component="form" onSubmit={handleSubmit} spacing={2}>
+          {/* Trainee (hidden if fixed) */}
+          {!defaultTraineeId && (
+            <FormControl fullWidth required error={submitted && !traineeId}>
+              <InputLabel id="trainee-label">מתאמן</InputLabel>
+              <Select
+                labelId="trainee-label"
+                label="מתאמן"
+                value={traineeId}
+                onChange={(e) => setTraineeId(e.target.value)}
+                displayEmpty
+                renderValue={(val) =>
+                  val ? (
+                    trainees.find((t) => t.traineeId === val)?.traineeName ?? val
+                  ) : (
+                    <span style={{ opacity: 0.6 }}>בחר/י מתאמן…</span>
+                  )
+                }
+              >
+                <MenuItem value="">
+                  <em>בחר/י מתאמן…</em>
+                </MenuItem>
+                {trainees.map((t) => (
+                  <MenuItem key={t.traineeId} value={t.traineeId}>
+                    {t.traineeName}
+                  </MenuItem>
+                ))}
+              </Select>
+              {submitted && !traineeId && (
+                <FormHelperText>שדה חובה</FormHelperText>
+              )}
+            </FormControl>
+          )}
+
+          {/* Workout date */}
+          <FormControl fullWidth required error={submitted && !workoutDate}>
+            <TextField
+              label="תאריך אימון"
+              type="date"
+              value={workoutDate}
+              onChange={(e) => setWorkoutDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+            {submitted && !workoutDate && (
+              <FormHelperText>שדה חובה</FormHelperText>
+            )}
+          </FormControl>
+
+          {/* Exercise type + quick-add */}
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+            <FormControl fullWidth required error={submitted && !exerciseTypeId}>
+              <InputLabel id="type-label">סוג תרגיל</InputLabel>
+              <Select
+                labelId="type-label"
+                label="סוג תרגיל"
+                value={exerciseTypeId}
+                onChange={(e) => {
+                  setExerciseTypeId(e.target.value);
+                  setExerciseId(""); // reset exercise when changing type
+                }}
+                displayEmpty
+                renderValue={(val) => {
+                  if (!val) return <span style={{ opacity: 0.6 }}>בחר/י סוג תרגיל…</span>;
+                  const t = types.find((x) => x.exerciseTypeId === val);
+                  return t?.exerciseTypeName ?? val;
+                }}
+              >
+                <MenuItem value="">
+                  <em>בחר/י סוג תרגיל…</em>
+                </MenuItem>
+                {types.map((t) => (
+                  <MenuItem key={t.exerciseTypeId} value={t.exerciseTypeId}>
+                    {t.exerciseTypeName}
+                  </MenuItem>
+                ))}
+              </Select>
+              {submitted && !exerciseTypeId && (
+                <FormHelperText>שדה חובה</FormHelperText>
+              )}
+            </FormControl>
+
+            <Button variant="outlined" onClick={() => setTypeDialogOpen(true)}>
+              הוסף סוג תרגיל חדש
+            </Button>
+          </Stack>
+
+          {/* Exercise picker + quick-add */}
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+            <FormControl fullWidth required error={submitted && !exerciseId}>
+              <InputLabel id="exercise-label">תרגיל קיים</InputLabel>
+              <Select
+                labelId="exercise-label"
+                label="תרגיל קיים"
+                value={exerciseId}
+                onChange={(e) => setExerciseId(e.target.value)}
+                displayEmpty
+                renderValue={(val) => {
+                  if (!val) return <span style={{ opacity: 0.6 }}>בחר/י תרגיל…</span>;
+                  const ex = filteredExercises.find((x) => x.exerciseId === val);
+                  if (!ex) return val;
+                  const name =
+                    ex.exerciseType?.exerciseTypeName ||
+                    ex.exerciseTypeId ||
+                    "תרגיל";
+                  return `${name} — סטים: ${ex.sets}, חזרות: ${ex.repetitions}`;
+                }}
+              >
+                <MenuItem value="">
+                  <em>בחר/י תרגיל…</em>
+                </MenuItem>
+                {filteredExercises.map((ex) => (
+                  <MenuItem key={ex.exerciseId} value={ex.exerciseId}>
+                    {(ex.exerciseType?.exerciseTypeName ||
+                      ex.exerciseTypeId ||
+                      "תרגיל") +
+                      ` — סטים: ${ex.sets}, חזרות: ${ex.repetitions}`}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>
+                ניתן להוסיף תרגיל חדש (סטים/חזרות) בלחיצה על הכפתור משמאל.
+              </FormHelperText>
+              {submitted && !exerciseId && (
+                <FormHelperText error>שדה חובה</FormHelperText>
+              )}
+            </FormControl>
+
+            <Button
+              variant="outlined"
+              onClick={() => setExDialogOpen(true)}
+              disabled={!exerciseTypeId}
+              title={!exerciseTypeId ? "בחר/י קודם סוג תרגיל" : ""}
+            >
+              הוסף תרגיל חדש (סטים/חזרות)
+            </Button>
+          </Stack>
+
+          <Box>
+            <Button type="submit" variant="contained" disabled={submitting}>
+              {submitting ? "שולח…" : "דיווח אימון"}
+            </Button>
+          </Box>
+        </Stack>
+      </CardContent>
+
+      {/* Dialog: quick-add Exercise Type */}
+      <Dialog open={typeDialogOpen} onClose={() => setTypeDialogOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>הוספת סוג תרגיל</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="שם סוג תרגיל"
+            fullWidth
+            value={newTypeName}
+            onChange={(e) => setNewTypeName(e.target.value)}
+            disabled={creatingType}
           />
-        )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTypeDialogOpen(false)} disabled={creatingType} variant="outlined">
+            ביטול
+          </Button>
+          <Button onClick={handleCreateType} disabled={creatingType} variant="contained">
+            {creatingType ? "יוצר…" : "צור סוג"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-        {/* Exercise picker */}
-        <LabeledSelect
-          label="תרגיל"
-          value={exerciseId}
-          onChange={setExerciseId}
-          disabled={submitting || !exercises.length}
-          options={exercises.map((ex) => ({
-            value: ex.exerciseId,
-            // Prefer exercise type name if available
-            label: ex.exerciseType?.exerciseTypeName ?? ex.exerciseId,
-          }))}
-          emptyLabel="אין תרגילים"
-        />
+      {/* Dialog: quick-add Exercise (sets/reps) */}
+      <Dialog open={exDialogOpen} onClose={() => setExDialogOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>הוספת תרגיל חדש</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="חזרות (repetitions)"
+              type="number"
+              inputProps={{ min: 1 }}
+              value={newReps}
+              onChange={(e) => setNewReps(e.target.value)}
+              disabled={creatingExercise}
+              fullWidth
+            />
+            <TextField
+              label="סטים (sets)"
+              type="number"
+              inputProps={{ min: 1 }}
+              value={newSets}
+              onChange={(e) => setNewSets(e.target.value)}
+              disabled={creatingExercise}
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setExDialogOpen(false)} disabled={creatingExercise} variant="outlined">
+            ביטול
+          </Button>
+          <Button onClick={handleCreateExercise} disabled={creatingExercise} variant="contained">
+            {creatingExercise ? "יוצר…" : "צור תרגיל"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-        {/* Workout date/time */}
-        <LabeledInput
-          label="תאריך ושעה"
-          type="datetime-local"
-          value={workoutDate}
-          onChange={setWorkoutDate}
-          disabled={submitting}
-        />
-
-        {error && <p style={{ color: "crimson", margin: 0 }}>{error}</p>}
-        {success && <p style={{ color: "green", margin: 0 }}>{success}</p>}
-
-        <button type="submit" disabled={submitting} style={{ padding: 10 }}>
-          {submitting ? "שולח…" : "צור אימון ושייך תרגיל"}
-        </button>
-      </form>
-    </section>
-  );
-}
-
-function LabeledSelect({ label, value, onChange, disabled, options, emptyLabel }) {
-  return (
-    <label style={{ display: "grid", gap: 6 }}>
-      {label}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        style={{ padding: 8 }}
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={3500}
+        onClose={() => setSnack((s) => ({ ...s, open: false }))}
       >
-        {!options?.length ? (
-          <option value="">{emptyLabel || "No options"}</option>
-        ) : (
-          options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))
-        )}
-      </select>
-    </label>
+        <Alert
+          severity={snack.severity}
+          onClose={() => setSnack((s) => ({ ...s, open: false }))}
+          sx={{ width: "100%" }}
+        >
+          {snack.msg}
+        </Alert>
+      </Snackbar>
+    </Card>
   );
 }
 
-/** LabeledInput: generic input with a label */
-function LabeledInput({ label, type = "text", value, onChange, disabled, placeholder }) {
-  return (
-    <label style={{ display: "grid", gap: 6 }}>
-      {label}
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        placeholder={placeholder}
-        style={{ padding: 8 }}
-      />
-    </label>
-  );
-}
-
-function toDatetimeLocalValue(date) {
-  const d = new Date(date.getTime()); // clone to avoid mutation
-  const pad = (n) => String(n).padStart(2, "0");
-  const YYYY = d.getFullYear();
-  const MM = pad(d.getMonth() + 1);
-  const DD = pad(d.getDate());
-  const HH = pad(d.getHours());
-  const mm = pad(d.getMinutes());
-  return `${YYYY}-${MM}-${DD}T${HH}:${mm}`;
+function toISO(d) {
+  return d.toISOString().slice(0, 10);
 }

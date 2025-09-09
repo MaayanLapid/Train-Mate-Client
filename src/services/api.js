@@ -7,10 +7,10 @@ async function handleJson(res, fallbackMsg = "Request failed") {
       const text = await res.text();
       if (text) msg = `${fallbackMsg} (${res.status}): ${text}`;
     } catch {
-         }
+    }
     throw new Error(msg);
   }
-    if (res.status === 204) return null;
+  if (res.status === 204) return null;
   return res.json();
 }
 
@@ -129,3 +129,9 @@ export async function reportExercise({ workoutDate, traineeId, exerciseId }) {
   });
   return handleJson(res, "Failed to report exercise");
 }
+
+export async function fetchWorkoutById(id) {
+  const res = await fetch(`${API_BASE_URLS.workouts}/${id}`);
+  return handleJson(res, "Failed to fetch workout");
+}
+
